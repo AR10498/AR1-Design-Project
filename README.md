@@ -1,3 +1,3 @@
-# ProgPy
+# AR10498 Project Template Files
 
-Programming in Python interactive notes
+For the structures project
