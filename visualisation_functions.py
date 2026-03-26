@@ -159,11 +159,11 @@ def visualize_truss(
         marker, edge, face = mapping.get(n.condition,("o","b","none"))
         ax.plot(n.coords[0], n.coords[1], marker=marker, markeredgecolor=edge, markerfacecolor=face, markersize=8)
         if n.condition=='Reaction_Roller_H':
-            ax.plot(n.coords[0]-0.015, n.coords[1]-0.03, marker='o', markeredgecolor=edge, markerfacecolor=face, markersize=3)
-            ax.plot(n.coords[0]+0.015, n.coords[1]-0.03, marker='o', markeredgecolor=edge, markerfacecolor=face, markersize=3)
+            ax.plot(n.coords[0]-head_width/3, n.coords[1]-head_width/1.5, marker='o', markeredgecolor=edge, markerfacecolor=face, markersize=3)
+            ax.plot(n.coords[0]+head_width/3, n.coords[1]-head_width/1.5, marker='o', markeredgecolor=edge, markerfacecolor=face, markersize=3)
         if n.condition=='Reaction_Roller_V':
-            ax.plot(n.coords[0]-0.03, n.coords[1]+0.01, marker='o', markeredgecolor=edge, markerfacecolor=face, markersize=3)
-            ax.plot(n.coords[0]-0.03, n.coords[1]-0.01, marker='o', markeredgecolor=edge, markerfacecolor=face, markersize=3)
+            ax.plot(n.coords[0]-head_width/1.5, n.coords[1]+head_width/3, marker='o', markeredgecolor=edge, markerfacecolor=face, markersize=3)
+            ax.plot(n.coords[0]-head_width/1.5, n.coords[1]-head_width/3, marker='o', markeredgecolor=edge, markerfacecolor=face, markersize=3)
         if show_node_labels:
             ax.text(n.coords[0]+0.02, n.coords[1]+0.02, n.label,
                     fontsize=10*textscale, weight="bold")
@@ -174,22 +174,23 @@ def visualize_truss(
             Fx = n.F_x
             Fy = n.F_y
             if Fx != 0:
-                start_x = n.coords[0]-np.sign(Fx)*arrow_len
-                ax.arrow(start_x,n.coords[1], np.sign(Fx)*arrow_len,0,
-                         fc='red', ec='red', head_width=head_width, head_length=head_length,
-                         length_includes_head=True)
+                dir_x = np.sign(-Fx)
+                start_x = n.coords[0]-dir_x*arrow_len
+                ax.arrow(start_x,n.coords[1], dir_x*arrow_len,0,
+                         fc='m', ec='m', width=head_width/10, head_width=head_width, head_length=head_length,
+                         length_includes_head=True, zorder=1000)
                 if show_load_labels:
-                    ax.text(start_x-np.sign(Fx)*text_offset,n.coords[1],
-                            f"Fx={Fx:+.1f}kN", color='red', fontsize=8*textscale, ha='center')
+                    ax.text(start_x-dir_x*text_offset,n.coords[1]+text_offset,
+                            f"Fx={Fx:+.1f}kN", color='m', fontsize=8*textscale, ha='center')
             if Fy != 0:
                 dir_y = np.sign(-Fy)
                 start_y = n.coords[1]-dir_y*arrow_len
                 ax.arrow(n.coords[0], start_y, 0, dir_y*arrow_len,
-                         fc='red', ec='red', head_width=head_width, head_length=head_length,
+                         fc='m', ec='m', width=head_width/10, head_width=head_width, head_length=head_length,
                          length_includes_head=True)
                 if show_load_labels:
                     ax.text(n.coords[0], start_y-dir_y*text_offset,
-                            f"Fy={Fy:+.1f}kN", color='red', fontsize=8*textscale, ha='center')
+                            f"Fy={Fy:+.1f}kN", color='m', fontsize=8*textscale, ha='center')
 
     # --- Plot Member UDLs (Global Orientation) ---
     if plot_loads:
@@ -236,6 +237,7 @@ def visualize_truss(
                     qy * tail_length,
                     fc='orange',
                     ec='orange',
+                    width=head_width/10,
                     head_width=head_width * 0.5,
                     head_length=head_length * 0.5,
                     length_includes_head=True,
@@ -273,29 +275,29 @@ def visualize_truss(
             Rx, Ry = n.R_x, n.R_y
     
             # Horizontal reaction arrow
-            if Rx != 0:
-                dx = -Rx/abs(Rx)*arrow_len
+            if abs(Rx) > 1e-9:
+                dx = Rx/abs(Rx)*arrow_len
                 ax.arrow(n.coords[0]+dx, n.coords[1], -dx, 0,
-                         fc='black', ec='black', head_width=head_width, head_length=head_length,
-                         length_includes_head=True)
+                         fc='black', ec='black', width=head_width/10, head_width=head_width, head_length=head_length,
+                         length_includes_head=True, zorder=1000)
                 if show_reaction_labels:
-                    ax.text(n.coords[0]+dx-np.sign(dx)*text_offset, n.coords[1],
-                            f"Rₓ={Rx:.1f} kN", color='black', fontsize=8*textscale, ha='center')
+                    ax.text(n.coords[0]+dx-np.sign(dx)*text_offset, n.coords[1]+text_offset,
+                            f"Rx={Rx:.1f} kN", color='black', fontsize=8*textscale, ha='center')
     
             # Vertical reaction arrow: always drawn below node
             vert_offset = arrow_len
             if Ry > 0:
                 ax.arrow(n.coords[0], n.coords[1], 0, -vert_offset, fc='black', ec='black',
-                         head_width=head_width, head_length=head_length, length_includes_head=True)
+                         width=head_width/10, head_width=head_width, head_length=head_length, length_includes_head=True)
                 if show_reaction_labels:
                     ax.text(n.coords[0], n.coords[1]-vert_offset-text_offset,
-                            f"Rᵧ={Ry:.1f} kN", color='black', fontsize=8*textscale, ha='center', va='top')
+                            f"Ry={Ry:.1f} kN", color='black', fontsize=8*textscale, ha='center', va='top')
             elif Ry < 0:
                 ax.arrow(n.coords[0], n.coords[1]-vert_offset, 0, vert_offset, fc='black', ec='black',
-                         head_width=head_width, head_length=head_length, length_includes_head=True)
+                         width=head_width/10, head_width=head_width, head_length=head_length, length_includes_head=True)
                 if show_reaction_labels:
                     ax.text(n.coords[0], n.coords[1]-vert_offset-text_offset,
-                            f"Rᵧ={Ry:.1f} kN", color='black', fontsize=8*textscale, ha='center', va='top')
+                            f"Ry={Ry:.1f} kN", color='black', fontsize=8*textscale, ha='center', va='top')
 
     
 
@@ -313,3 +315,4 @@ def visualize_truss(
 
     ax.set_title("Truss Visualization", fontsize=11 * textscale)
     plt.show()
+    return fig

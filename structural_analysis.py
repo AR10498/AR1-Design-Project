@@ -18,7 +18,7 @@ def compute_support_reactions(nodes, verbose=True):
     """
     Compute 2D support reactions satisfying ΣFx=0, ΣFy=0, ΣM=0.
     Solves moment equilibrium first.
-    Uses moment convention: M = x*Fy + y*Fx
+    Uses moment convention: M = x*Fy - y*Fx
     Respects support types:
         Reaction_Fixed    -> Rx & Ry
         Reaction_Pinned   -> Rx & Ry
@@ -61,7 +61,7 @@ def compute_support_reactions(nodes, verbose=True):
         Fy = n.F_ytotal
         x, y = n.coords[:2]
         dx, dy = x - x_ref, y - y_ref
-        Mz = dx * Fy + dy * Fx
+        Mz = dx * Fy - dy * Fx
         M_loads += Mz
 
     # --- Step 6: Build unknowns only for restrained directions ---
@@ -106,7 +106,7 @@ def compute_support_reactions(nodes, verbose=True):
             A[2, vars["Rx"]] = dy
         if vars["Ry"] is not None:
             A[2, vars["Ry"]] = dx
-    b[2] = -M_loads
+    b[2] = M_loads
 
     # --- Step 8: Solve ---
     sol, *_ = np.linalg.lstsq(A, b, rcond=None)
@@ -118,7 +118,7 @@ def compute_support_reactions(nodes, verbose=True):
     Fx_check = total_Fx + sum(r["Rx"] for r in reactions.values())
     Fy_check = total_Fy + sum(r["Ry"] for r in reactions.values())
     M_check = M_loads + sum(
-        (supports[l].coords[0] - x_ref) * r["Ry"] +
+        (supports[l].coords[0] - x_ref) * r["Ry"] -
         (supports[l].coords[1] - y_ref) * r["Rx"]
         for l, r in reactions.items()
     )
@@ -128,9 +128,9 @@ def compute_support_reactions(nodes, verbose=True):
         for label, r in reactions.items():
             print(f"{label}: Rx={r['Rx']:+.3f}, Ry={r['Ry']:+.3f}")
         print("\n--- Equilibrium Check ---")
-        print(f"ΣFx = {Fx_check:+.3e}")
-        print(f"ΣFy = {Fy_check:+.3e}")
-        print(f"ΣM  = {M_check:+.3e} (about {ref_label})")
+        print(f"ΣFx = {Fx_check:+.3f}")
+        print(f"ΣFy = {Fy_check:+.3f}")
+        print(f"ΣM  = {M_check:+.3f} (about {ref_label})")
 
     for label,comp in reactions.items():
         nodes[label].R_x = comp['Rx']
