@@ -50,21 +50,23 @@ def visualize_truss(
 
     xs = [n.coords[0] for n in nodes.values()]
     ys = [n.coords[1] for n in nodes.values()]
-    span = max(max(xs)-min(xs), max(ys)-min(ys))
+    
+    span = max(max(xs) - min(xs), max(ys) - min(ys), 1.0)
+    
     arrow_len = 0.1 * span
     head_width = 0.25 * arrow_len
     head_length = 0.25 * arrow_len
-    text_offset = 0.03 * span / len(nodes)
+    
+    text_offset = 0.03 * span / max(len(nodes), 1)
 
     if show_stresses:
         stresses = {m.name: m.stress for m in members.values()}
         
-        # --- Stress colormap setup ---
+        # Stress colormap setup 
         stress_cmap, stress_norm = None, None
-        #vmax = max(stresses.values())
-        vmax = max(abs(max(stresses.values())), abs(min(stresses.values())))
-        vmin = -vmax #
-        #vmin = min(stresses.values())
+        vmax = max(max(abs(s) for s in stresses.values()), 1e-6)
+        
+        vmin = -vmax
         stress_norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
         stress_cmap = mcolors.LinearSegmentedColormap.from_list(
             "stressmap", [(0.0, "darkred"), (0.5, "lightgrey"), (1.0, "darkblue")]
@@ -73,7 +75,7 @@ def visualize_truss(
     if show_utilisations:
         utilisations = {m.name: m.utilisation for m in members.values()}
 
-        # --- Utilisation colormap setup ---
+        # Utilisation colormap setup
         util_cmap, util_norm = None, None
         util_colors = {}
         if max_util==None:
@@ -81,17 +83,24 @@ def visualize_truss(
         util_cap = max(1.5, max_util)
         util_norm = mcolors.Normalize(vmin=0, vmax=util_cap)
         util_cmap = plt.get_cmap("rainbow")
-        util_colors = {mname: util_cmap(util_norm(min(u, util_cap))) for mname, u in zip(members, [utilisations[mname] for mname in members])}
+        util_colors = {mname: util_cmap(util_norm(min(utilisations[mname], util_cap))) 
+                       for mname in utilisations}
 
-    # --- Draw members and labels ---
+    # Draw members and labels
     for m in members.values():
-        x1, y1 = m.node_start().coords[:2]
-        x2, y2 = m.node_end().coords[:2]
+        n1 = m.start_node
+        n2 = m.end_node
+        
+        if n1.label > n2.label:
+            n1, n2 = n2, n1
+        
+        x1, y1 = n1.coords[:2]
+        x2, y2 = n2.coords[:2]
 
         # Base color for member
         col = "grey"
         if show_forces and not show_stresses:
-            F = m.force
+            F = m.axial_force
             if F > 1e-6: col="blue"
             elif F < -1e-6: col="red"
        
@@ -108,101 +117,146 @@ def visualize_truss(
         # Draw straight member
         ax.plot([x1,x2],[y1,y2], color=col, lw=2)
 
-        # --- Member labels ---
-        mid_x, mid_y = (x1+x2)/2, (y1+y2)/2
+        # Member labels 
         label = ""
         if show_member_labels: label += f"{m.name}"
         if show_material_labels and hasattr(m,"material") and m.material is not None:
             label += f"\n{m.material}"
         if show_force_labels:
-            F_val = m.force
+            F_val = m.axial_force
             if abs(F_val) > 1e-6:
-                label += f"\nF = {m.force:.1f}"
+                label += f"\nF = {m.axial_force:.1f}"
         if show_bending_moment_labels:
-            M_val = max(abs(m.moments['M_max']), abs(m.moments['M_min']))
+            M_max = m.moments.get('M_max', 0.0)
+            M_min = m.moments.get('M_min', 0.0)
+            M_val = max(abs(M_max), abs(M_min))
             if abs(M_val) > 1e-6:            
                 label += f"\nM = {M_val:.1f}"
         if show_stress_labels and stresses and m.name in stresses:
             sigma_val = stresses[m.name]
             if abs(sigma_val) > 1e-6:
                 label += f"\nσ = {stresses[m.name]:.1f} MPa"
+                
         if label:
-            ax.text(mid_x, mid_y + text_offset,
-                    label, rotation=30 ,fontsize=9*textscale, ha="center", va="center", color="purple")
-
-    # --- Draw bending moment curves separately ---
+            dx = x2 - x1
+            dy = y2 - y1
+            L = math.hypot(dx, dy)
+        
+            if L < 1e-9:
+                continue
+        
+            # Text rotation
+            rotation = np.degrees(np.arctan2(dy, dx))
+        
+            if rotation > 90:
+                rotation -= 180
+            elif rotation < -90:
+                rotation += 180
+        
+            if abs(rotation) > 85:
+                rotation = 90
+        
+            # Unit normal
+            nx = -dy / L
+            ny = dx / L
+        
+            # Mid-point
+            label_x = x1 + dx*0.4
+            label_y = y1 + dy*0.4
+        
+            offset = 3 * text_offset
+        
+            ax.text(
+                label_x + nx * offset,
+                label_y + ny * offset,
+                label,
+                rotation=rotation,
+                rotation_mode="anchor",
+                fontsize=9 * textscale,
+                ha="center",
+                va="center",
+                color="purple"
+            )
+            
+    # Draw bending moment curves separately 
     if show_bending_moments:
         for m in members.values():
             moments = m.moments
+            if 'points' not in moments:
+                continue
             M_curve = np.array(moments['points'])
             sx = 1 #positive to right
             sy = -1 #positive down
             if np.allclose(M_curve,0.0): continue
 
-            x1, y1 = m.node_start().coords[:2]
-            x2, y2 = m.node_end().coords[:2]
-            dx, dy = abs(x2-x1), abs(y2-y1)
-            L = math.hypot(dx,dy)
+            x1, y1 = m.start_node.coords[:2]
+            x2, y2 = m.end_node.coords[:2]
+            dx = x2 - x1
+            dy = y2 - y1            
+            L = math.hypot(dx, dy)
             if L < 1e-9: continue
+            nx = -dy / L
+            ny = dx / L
 
             n_points = len(M_curve)
             xs_curve = np.linspace(x1,x2,n_points)
             ys_curve = np.linspace(y1,y2,n_points)
-            nx, ny = dy/L, dx/L
+
             sagging = M_curve*moment_scale
             plot_xs = xs_curve + sx*nx*sagging
             plot_ys = ys_curve + sy*ny*sagging
             ax.plot(plot_xs, plot_ys, color="orange", lw=2, zorder=3)
 
-    # --- Plot nodes ---
+    # Plot nodes 
     for n in nodes.values():
         marker, edge, face = mapping.get(n.condition,("o","b","none"))
         ax.plot(n.coords[0], n.coords[1], marker=marker, markeredgecolor=edge, markerfacecolor=face, markersize=8)
         if n.condition=='Reaction_Roller_H':
-            ax.plot(n.coords[0]-0.015, n.coords[1]-0.03, marker='o', markeredgecolor=edge, markerfacecolor=face, markersize=3)
-            ax.plot(n.coords[0]+0.015, n.coords[1]-0.03, marker='o', markeredgecolor=edge, markerfacecolor=face, markersize=3)
+            ax.plot(n.coords[0]-head_width/3, n.coords[1]-head_width/1.5, marker='o', markeredgecolor=edge, markerfacecolor=face, markersize=3)
+            ax.plot(n.coords[0]+head_width/3, n.coords[1]-head_width/1.5, marker='o', markeredgecolor=edge, markerfacecolor=face, markersize=3)
         if n.condition=='Reaction_Roller_V':
-            ax.plot(n.coords[0]-0.03, n.coords[1]+0.01, marker='o', markeredgecolor=edge, markerfacecolor=face, markersize=3)
-            ax.plot(n.coords[0]-0.03, n.coords[1]-0.01, marker='o', markeredgecolor=edge, markerfacecolor=face, markersize=3)
+            ax.plot(n.coords[0]-head_width/1.5, n.coords[1]+head_width/3, marker='o', markeredgecolor=edge, markerfacecolor=face, markersize=3)
+            ax.plot(n.coords[0]-head_width/1.5, n.coords[1]-head_width/3, marker='o', markeredgecolor=edge, markerfacecolor=face, markersize=3)
         if show_node_labels:
             ax.text(n.coords[0]+0.02, n.coords[1]+0.02, n.label,
                     fontsize=10*textscale, weight="bold")
 
-    # --- Plot node loads ---
+    # Plot node loads 
     if plot_loads:
         for n in nodes.values():
             Fx = n.F_x
             Fy = n.F_y
             if Fx != 0:
-                start_x = n.coords[0]-np.sign(Fx)*arrow_len
-                ax.arrow(start_x,n.coords[1], np.sign(Fx)*arrow_len,0,
-                         fc='red', ec='red', head_width=head_width, head_length=head_length,
-                         length_includes_head=True)
+                dir_x = np.sign(-Fx)
+                start_x = n.coords[0]-dir_x*arrow_len
+                ax.arrow(start_x,n.coords[1], dir_x*arrow_len,0,
+                         fc='m', ec='m', width=head_width/10, head_width=head_width, head_length=head_length,
+                         length_includes_head=True, zorder=1000)
                 if show_load_labels:
-                    ax.text(start_x-np.sign(Fx)*text_offset,n.coords[1],
-                            f"Fx={Fx:+.1f}kN", color='red', fontsize=8*textscale, ha='center')
+                    ax.text(start_x-dir_x*text_offset,n.coords[1]+text_offset,
+                            f"Fx={Fx:+.1f}kN", color='m', fontsize=8*textscale, ha='center')
             if Fy != 0:
                 dir_y = np.sign(-Fy)
                 start_y = n.coords[1]-dir_y*arrow_len
                 ax.arrow(n.coords[0], start_y, 0, dir_y*arrow_len,
-                         fc='red', ec='red', head_width=head_width, head_length=head_length,
+                         fc='m', ec='m', width=head_width/10, head_width=head_width, head_length=head_length,
                          length_includes_head=True)
                 if show_load_labels:
                     ax.text(n.coords[0], start_y-dir_y*text_offset,
-                            f"Fy={Fy:+.1f}kN", color='red', fontsize=8*textscale, ha='center')
+                            f"Fy={Fy:+.1f}kN", color='m', fontsize=8*textscale, ha='center')
 
-    # --- Plot Member UDLs (Global Orientation) ---
+    # Plot Member UDLs (Global Orientation) 
     if plot_loads:
         for m in members.values():    
-            Fx_udl = m.F_x 
-            Fy_udl = m.F_y
+            Fx_udl = m.udl_x 
+            Fy_udl = m.udl_y
     
             if abs(Fx_udl) < 1e-6 and abs(Fy_udl) < 1e-6:
                 continue
     
             # Member geometry
-            x1, y1 = m.node_start().coords[:2]
-            x2, y2 = m.node_end().coords[:2]
+            x1, y1 = m.start_node.coords[:2]
+            x2, y2 = m.end_node.coords[:2]
             L = math.hypot(x2 - x1, y2 - y1)
             if L < 1e-9:
                 continue
@@ -236,6 +290,7 @@ def visualize_truss(
                     qy * tail_length,
                     fc='orange',
                     ec='orange',
+                    width=head_width/10,
                     head_width=head_width * 0.5,
                     head_length=head_length * 0.5,
                     length_includes_head=True,
@@ -248,7 +303,7 @@ def visualize_truss(
             tail_xs, tail_ys = zip(*tail_points)
             ax.plot(tail_xs, tail_ys, color='orange', lw=1, zorder=1)
     
-            # --- Place label at the end of the center arrow tail ---
+            # Place label at the end of the center arrow tail 
             mid_i = len(tail_points) // 2
             tail_x, tail_y = tail_points[mid_i]
     
@@ -267,39 +322,39 @@ def visualize_truss(
                 va='center'
             )
 
-    # --- Plot reactions ---
+    # Plot reactions 
     if show_reactions:
         for n in nodes.values():
             Rx, Ry = n.R_x, n.R_y
     
             # Horizontal reaction arrow
-            if Rx != 0:
-                dx = -Rx/abs(Rx)*arrow_len
+            if abs(Rx) > 1e-9:
+                dx = Rx/abs(Rx)*arrow_len
                 ax.arrow(n.coords[0]+dx, n.coords[1], -dx, 0,
-                         fc='black', ec='black', head_width=head_width, head_length=head_length,
-                         length_includes_head=True)
+                         fc='black', ec='black', width=head_width/10, head_width=head_width, head_length=head_length,
+                         length_includes_head=True, zorder=1000)
                 if show_reaction_labels:
-                    ax.text(n.coords[0]+dx-np.sign(dx)*text_offset, n.coords[1],
-                            f"Rₓ={Rx:.1f} kN", color='black', fontsize=8*textscale, ha='center')
+                    ax.text(n.coords[0]+dx-np.sign(dx)*text_offset, n.coords[1]+text_offset,
+                            f"Rx={Rx:.1f} kN", color='black', fontsize=8*textscale, ha='center')
     
             # Vertical reaction arrow: always drawn below node
             vert_offset = arrow_len
             if Ry > 0:
                 ax.arrow(n.coords[0], n.coords[1], 0, -vert_offset, fc='black', ec='black',
-                         head_width=head_width, head_length=head_length, length_includes_head=True)
+                         width=head_width/10, head_width=head_width, head_length=head_length, length_includes_head=True)
                 if show_reaction_labels:
                     ax.text(n.coords[0], n.coords[1]-vert_offset-text_offset,
-                            f"Rᵧ={Ry:.1f} kN", color='black', fontsize=8*textscale, ha='center', va='top')
+                            f"Ry={Ry:.1f} kN", color='black', fontsize=8*textscale, ha='center', va='top')
             elif Ry < 0:
                 ax.arrow(n.coords[0], n.coords[1]-vert_offset, 0, vert_offset, fc='black', ec='black',
-                         head_width=head_width, head_length=head_length, length_includes_head=True)
+                         width=head_width/10, head_width=head_width, head_length=head_length, length_includes_head=True)
                 if show_reaction_labels:
                     ax.text(n.coords[0], n.coords[1]-vert_offset-text_offset,
-                            f"Rᵧ={Ry:.1f} kN", color='black', fontsize=8*textscale, ha='center', va='top')
+                            f"Ry={Ry:.1f} kN", color='black', fontsize=8*textscale, ha='center', va='top')
 
     
 
-    # --- Colorbars ---
+    # Colorbars 
     if show_colorbar:
         if show_stresses and stress_cmap:
             sm = cm.ScalarMappable(norm=stress_norm, cmap=stress_cmap)
@@ -312,4 +367,5 @@ def visualize_truss(
             cbar2.set_label("Utilisation ratio (σ / allowable)", fontsize=9 * textscale)
 
     ax.set_title("Truss Visualization", fontsize=11 * textscale)
-    plt.show()
+    #plt.show()
+    return fig, ax

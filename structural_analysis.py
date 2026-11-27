@@ -18,17 +18,17 @@ def compute_support_reactions(nodes, verbose=True):
     """
     Compute 2D support reactions satisfying ΣFx=0, ΣFy=0, ΣM=0.
     Solves moment equilibrium first.
-    Uses moment convention: M = x*Fy + y*Fx
+    Uses moment convention: M = x*Fy - y*Fx
     Respects support types:
         Reaction_Fixed    -> Rx & Ry
         Reaction_Pinned   -> Rx & Ry
         Reaction_Roller_H -> Ry only
         Reaction_Roller_V -> Rx only
     """
-    # --- Reset previous reactions and total loads ---
+    # Reset previous reactions and total loads 
     reset_reactions_and_loads(nodes)
     
-    # --- Step 1: Identify supports ---
+    # Step 1: Identify supports 
     supports = {label: n for label, n in nodes.items()
                 if getattr(n, "condition", "").startswith("Reaction")}
     reactions = {label: {"Rx": 0.0, "Ry": 0.0} for label in supports}
@@ -37,7 +37,7 @@ def compute_support_reactions(nodes, verbose=True):
         print("! No supports found. Returning zeros.")
         return reactions
 
-    # --- Step 2: Restrained directions ---
+    # Step 2: Restrained directions 
     def restrained(cond):
         if cond == "Reaction_Fixed":      return True, True
         if cond == "Reaction_Pinned":     return True, True
@@ -45,26 +45,26 @@ def compute_support_reactions(nodes, verbose=True):
         if cond == "Reaction_Roller_V":   return True, False
         return False, False  # internal joints
 
-    # --- Step 3: Sum applied forces ---
-    total_Fx = sum(getattr(n, "F_xtotal", getattr(n, "F_x", 0.0)) for n in nodes.values())
-    total_Fy = sum(getattr(n, "F_ytotal", getattr(n, "F_y", 0.0)) for n in nodes.values())
+    # Step 3: Sum applied forces -- looks for n.F_xtotal else takes n.f_x
+    total_Fx = sum((n.F_xtotal or n.F_x) for n in nodes.values())
+    total_Fy = sum((n.F_ytotal or n.F_y) for n in nodes.values())
 
-    # --- Step 4: Reference point for moments ---
+    # Step 4: Reference point for moments 
     labels = list(supports.keys())
     ref_label = labels[0]
     x_ref, y_ref = supports[ref_label].coords[:2]
 
-    # --- Step 5: Total applied moment (xFy + yFx) ---
+    # Step 5: Total applied moment (xFy - yFx) 
     M_loads = 0.0
     for n in nodes.values():
         Fx = n.F_xtotal
         Fy = n.F_ytotal
         x, y = n.coords[:2]
         dx, dy = x - x_ref, y - y_ref
-        Mz = dx * Fy + dy * Fx
+        Mz = dx * Fy - dy * Fx
         M_loads += Mz
 
-    # --- Step 6: Build unknowns only for restrained directions ---
+    # Step 6: Build unknowns only for restrained directions 
     unknowns = []
     label_to_vars = {}
     for label, s in supports.items():
@@ -90,13 +90,13 @@ def compute_support_reactions(nodes, verbose=True):
     for label, vars in label_to_vars.items():
         if vars["Rx"] is not None:
             A[0, vars["Rx"]] = 1.0
-    b[0] = -total_Fx
+    b[0] = total_Fx
 
     # ΣFy = 0
     for label, vars in label_to_vars.items():
         if vars["Ry"] is not None:
             A[1, vars["Ry"]] = 1.0
-    b[1] = -total_Fy
+    b[1] = total_Fy
 
     # ΣM = 0 about reference
     for label, vars in label_to_vars.items():
@@ -106,31 +106,33 @@ def compute_support_reactions(nodes, verbose=True):
             A[2, vars["Rx"]] = dy
         if vars["Ry"] is not None:
             A[2, vars["Ry"]] = dx
-    b[2] = -M_loads
+    b[2] = M_loads
 
-    # --- Step 8: Solve ---
+    # Step 8: Solve 
     sol, *_ = np.linalg.lstsq(A, b, rcond=None)
     for i, name in enumerate(unknowns):
         label, comp = name.split("_")
-        reactions[label][comp] = sol[i]
+        reactions[label][comp] = -sol[i]
 
-    # --- Step 9: Equilibrium check ---
+    # Step 9: Equilibrium check 
     Fx_check = total_Fx + sum(r["Rx"] for r in reactions.values())
     Fy_check = total_Fy + sum(r["Ry"] for r in reactions.values())
     M_check = M_loads + sum(
-        (supports[l].coords[0] - x_ref) * r["Ry"] +
+        (supports[l].coords[0] - x_ref) * r["Ry"] -
         (supports[l].coords[1] - y_ref) * r["Rx"]
         for l, r in reactions.items()
     )
 
     if verbose:
-        print("\n--- Support Reactions ---")
+        print("\nSupport Reactions")
+        print("\n-----------------")
         for label, r in reactions.items():
             print(f"{label}: Rx={r['Rx']:+.3f}, Ry={r['Ry']:+.3f}")
-        print("\n--- Equilibrium Check ---")
-        print(f"ΣFx = {Fx_check:+.3e}")
-        print(f"ΣFy = {Fy_check:+.3e}")
-        print(f"ΣM  = {M_check:+.3e} (about {ref_label})")
+        print("\nEquilibrium Check")
+        print("\n-----------------")
+        print(f"ΣFx = {Fx_check:+.3f}")
+        print(f"ΣFy = {Fy_check:+.3f}")
+        print(f"ΣM  = {M_check:+.3f} (about {ref_label})")
 
     for label,comp in reactions.items():
         nodes[label].R_x = comp['Rx']
