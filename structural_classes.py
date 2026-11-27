@@ -1,84 +1,155 @@
-import string
-import math 
+from dataclasses import dataclass, field
+from enum import Enum
+import math
 
-# ==========================
-#   CLASSES
-# ==========================
+# SUPPORT TYPES
+class SupportType(Enum):
+    FREE = "Free"
+    ROLLER = "Roller"
+    PINNED = "Pinned"
+    FIXED = "Fixed"
+
+
+def index_to_label(idx):
+    """
+    Convert:
+    0 -> A
+    1 -> B
+    ...
+    25 -> Z
+    26 -> AA
+    27 -> AB
+    ...
+    """
+    label = ""
+    while True:
+        idx, rem = divmod(idx, 26)
+        label = chr(65 + rem) + label
+        if idx == 0:
+            break
+        idx -= 1
+    return label
+
+
+# NODE
 class Node:
     """
-    Node object with coordinates (x, y, z)
+    Structural node with coordinates, loads, reactions and support condition.
     """
     def __init__(self, id, coords, label=None, condition="Pinned"):
-        """
-        Initialises with default properties:
-        F_x = 0.0 # Point load in x
-        F_y = 0.0 # Point load in y
-        R_x = 0.0 # Reaction in x
-        R_y = 0.0 # Reaction in y
-        """
+
         self.id = id
-        self.coords = list(coords)
-        nodelabels = [c * i for i in range(1, 4) for c in string.ascii_uppercase]
-        self.label = label or nodelabels[id]
+        self.coords = tuple([float(n) for n in coords])
+
+        if label is None:
+            label = index_to_label(id)
+
+        self.label = label
         self.condition = condition
-        self.unknowns = 0
+
+        # Applied loads
         self.F_x = 0.0
         self.F_y = 0.0
+
+        # Support reactions
         self.R_x = 0.0
-        self.R_y = 0.0        
-        self.connectivity=[] # undirected connections
+        self.R_y = 0.0
+
+        # Connected node labels
+        self.connectivity = []
+
+    def unknowns(self):
+    
+        support_unknowns = {
+            "Pinned": 0,
+            "Fixed": 0,
+    
+            "Reaction_Roller_H": 1,
+            "Reaction_Roller_V": 1,
+    
+            "Reaction_Pinned": 2,
+            "Reaction_Fixed": 3,
+        }
+    
+        return support_unknowns.get(self.condition, 0)
 
 
+# MEMBER
 class Member:
-    def __init__(self, id, nodes, startnode, endnode):
+    """
+    Structural member connecting two nodes.
+    """
+    def __init__(self, id, start_node, end_node):
+
+        # Unique numerical identifier
         self.id = id
-        self.nodes = nodes
-        self.startnode = startnode
-        self.endnode = endnode
-        #self.length = self.compute_member_length()
-        self.compute_length()
-        self.rotation = 0
-        self.name = "-".join(sorted([startnode, endnode]))
+
+        # References to the nodes at each end
+        self.start_node = start_node
+        self.end_node = end_node
+
+        # Material object
+        # e.g. Steel, Timber, Aluminium
         self.material = None
-        # Standardized property keys
+
+        # Uniformly distributed loads
+        # Applied in the global coordinate system
+        self.udl_x = 0.0      # horizontal UDL (kN/m)
+        self.udl_x = 0.0      # vertical UDL (kN/m)
+
+        # Analysis results
+        self.axial_force = 0.0        # axial force
+        self.stress = 0.0       # axial stress
+        self.utilisation = 0.0  # demand / capacity ratio
+
+        # General property dictionary
+        # Can store values such as:
+        # E, A, I, density, section name, etc.
         self.properties = {}
-        # forces
-        # Uniformly distributed load per member (global axes)
-        self.F_x = 0.0 # Fx = horizontal UDL
-        self.F_y = 0.0 # Fy = vertical UDL (positive down)        
-        self.force = 0.0  # will store solved force
-        self.moments = {}
-        self.stress = 0.0
-        self.utilisation = 0.0
 
-    def node_start(self):
-        return self.nodes[self.startnode]
+        # End moments or other moment results
+        self.bending_moments = {}
 
-    def node_end(self):
-        return self.nodes[self.endnode]
+        # Create a consistent member name
+        # Sorting ensures:
+        # A-B and B-A become the same name
+        labels = sorted([
+            self.start_node.label,
+            self.end_node.label
+        ])
 
-    # --- Member lengths ---
-    def compute_length(self):
-        dx = self.node_end().coords[0] - self.node_start().coords[0]
-        dy = self.node_end().coords[1] - self.node_start().coords[1]
-        L = math.hypot(dx, dy)
-        if L < 1e-12:
-            L = 0.0
-        self.length = L
-        return L
+        self.name = "-".join(labels)
 
-    def vector_from(self, node):
-        if node == self.node_start():
-            other = self.node_end()
-        elif node == self.node_end():
-            other = self.node_start()
-        else:
-            return None
-        dx = other.coords[0] - node.coords[0]
-        dy = other.coords[1] - node.coords[1]
-        L = math.hypot(dx, dy)
-        if L < 1e-12:
-            return None
-        return (dx, dy)
+    def length(self):
+        """
+        Calculate member length from node coordinates.
 
-        
+        Returns
+        -------
+        float
+            Member length.
+        """
+        dx = (self.end_node.coords[0] - self.start_node.coords[0])
+        dy = (self.end_node.coords[1] - self.start_node.coords[1])
+        return math.hypot(dx, dy)
+
+    def direction_cosines(self):
+        """
+        Calculate direction cosines.
+
+        These are the x and y components
+        of a unit vector along the member.
+
+        Returns
+        -------
+        (cx, cy)
+
+        Example:
+            Horizontal member -> (1, 0)
+            Vertical member   -> (0, 1)
+            45° member        -> (0.707, 0.707)
+        """
+        dx = (self.end_node.coords[0] - self.start_node.coords[0])
+        dy = (self.end_node.coords[1] - self.start_node.coords[1])
+        L = self.length()
+        return (dx/L, dy/L)

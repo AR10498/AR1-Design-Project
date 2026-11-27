@@ -58,11 +58,11 @@ def calculate_total_forces(nodes, members):
         
         L = m.length
         
-        # --- Equivalent nodal loads due to global UDL ---
+        # Equivalent nodal loads due to global UDL 
         Fx_eq = Fx_udl * L / 2
         Fy_eq = Fy_udl * L / 2
         
-        # --- Add loads in global direction ---
+        # Add loads in global direction 
         m.node_start().F_xtotal += Fx_eq
         m.node_start().F_ytotal += Fy_eq
         m.node_end().F_xtotal += Fx_eq

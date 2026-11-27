@@ -8,6 +8,11 @@ from scipy.spatial import KDTree
 
 import pandas as pd
 
+def is_endpoint(point, line, tol):
+    start = Point(line.coords[0])
+    end = Point(line.coords[-1])
+    return (point.distance(start) < tol or point.distance(end) < tol)
+
 #############################
 #   GEOMETRY EXTRACTION
 #############################
@@ -90,20 +95,20 @@ def extract_structure_from_dxf(file_path, units='mm', tol=1e-3):
     intersections = set()
 
     for line1, line2 in itertools.combinations(shapely_lines, 2):
-
         inter = line1.intersection(line2)
-
         if inter.is_empty:
             continue
-
-        # Single intersection point
         if inter.geom_type == "Point":
-            intersections.add((inter.x, inter.y, 0))
-
-        # Multiple intersection points
+            # Only create a structural node if the
+            # intersection coincides with an endpoint
+            # on at least one member.
+            if (is_endpoint(inter, line1, tol) or is_endpoint(inter, line2, tol)):
+                intersections.add((inter.x, inter.y, 0))
+    
         elif inter.geom_type == "MultiPoint":
             for p in inter.geoms:
-                intersections.add((p.x, p.y, 0))
+                if (is_endpoint(p, line1, tol) or is_endpoint(p, line2, tol)):
+                    intersections.add((p.x, p.y, 0))
 
     # Add original member endpoints as nodes
     for start, end in lines_m:
@@ -195,31 +200,28 @@ def extract_structure_from_dxf(file_path, units='mm', tol=1e-3):
     # {'A': Node(...), 'B': Node(...)}
     nodes = {n.label: n for n in nodes_tmp.values()}
 
-    # Lookup table from integer ID to label
-    id_to_label = {i: node.label for i, node in nodes_tmp.items()}
-
-    # Create Member objects from split segments
     members = {}
+    
     for i, (n1, n2) in enumerate(split_segments):
-        startlabel = id_to_label[n1]
-        endlabel = id_to_label[n2]
-        if startlabel == endlabel:
-            continue
-        m = Member(i, nodes, startlabel, endlabel)
-
+    
+        start_node = nodes_tmp[n1]
+        end_node = nodes_tmp[n2]
+    
+        m = Member(i, start_node, end_node)
+    
         members[m.name] = m
-
-    # Build node connectivity lists
-    # Example:
-    # A connected to B and C
-    # -> A.connectivity = [B, C]
+    
+        # Build node connectivity lists
+        # Example:
+        # A connected to B and C
+        # -> A.connectivity = [B, C]
     for m in members.values():
-
-        n1 = m.node_start().label
-        n2 = m.node_end().label
-
-        nodes[n1].connectivity.append(n2)
-        nodes[n2].connectivity.append(n1)
+    
+        n1 = m.start_node.label
+        n2 = m.end_node.label
+    
+        m.start_node.connectivity.append(n2)
+        m.end_node.connectivity.append(n1)
 
     return nodes, members
 
@@ -293,8 +295,8 @@ def export_to_dxf(nodes, members, filename="output.dxf", units='mm'):
     doc = ezdxf.new(dxfversion="R2010")
     msp = doc.modelspace()
     for m in members.values():
-        x1,y1 = m.node_start().coords[:2]
-        x2,y2 = m.node_end().coords[:2]
+        x1,y1 = m.start_node.coords[:2]
+        x2,y2 = m.end_node.coords[:2]
         msp.add_line([x1*factor, y1*factor], [x2*factor, y2*factor])
     doc.saveas(filename)
     print(f"=> DXF exported to {filename}")
