@@ -29,14 +29,15 @@ def assign_materials_to_members(members, manual_assignments, material_df, defaul
 #   SUPPORT CONDITIONS
 # ==========================
 def apply_joint_conditions(nodes, joint_conditions):
-    unknowns={"Reaction_Fixed":2, "Reaction_Pinned":2,"Reaction_Roller_H":1, "Reaction_Roller_V":1}
-    for cond,keys in joint_conditions.items():
-        for key in keys:
-            n = nodes[key]
-            n.condition = cond
-    
     for n in nodes.values():
-        n.unknowns = unknowns.get(n.condition, 0)
+        n.condition = "Pinned"
+    for condition, labels in joint_conditions.items():
+        for label in labels:
+            if label not in nodes:
+                print(  f"Warning: node '{label}' not found "
+                        f"when assigning {condition}"  )
+                continue
+            nodes[label].condition = condition
 
 # ==========================
 #   LOAD ASSIGNMENT

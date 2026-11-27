@@ -1,10 +1,8 @@
 from structural_classes import Node, Member
-import ezdxf
+import math, ezdxf, itertools
 from shapely.geometry import Point, LineString
-import itertools 
 import numpy as np
 from scipy.spatial import KDTree
-#from collections import defaultdict
 
 import pandas as pd
 
@@ -200,13 +198,27 @@ def extract_structure_from_dxf(file_path, units='mm', tol=1e-3):
     # {'A': Node(...), 'B': Node(...)}
     nodes = {n.label: n for n in nodes_tmp.values()}
 
+    # Create Members
     members = {}
     
     for i, (n1, n2) in enumerate(split_segments):
     
         start_node = nodes_tmp[n1]
         end_node = nodes_tmp[n2]
-    
+        
+        L = math.hypot(
+            end_node.coords[0] - start_node.coords[0],
+            end_node.coords[1] - start_node.coords[1]
+        )
+
+        if L < 1e-9:
+            print(
+                f"Warning: ignored zero-length member "
+                f"between nodes {start_node.label} "
+                f"and {end_node.label}"
+            )
+            continue
+            
         m = Member(i, start_node, end_node)
     
         members[m.name] = m
